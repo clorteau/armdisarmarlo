@@ -2,7 +2,7 @@
 # NorthernLights 2018-11-02
 # - Display armed/disarmed status of Arlo cameras on LCD
 # - Arm/disarm on correct PIN input
-# - Take picture and upload to www.lorteau.fr/garage_snaps on wrong PIN, displaying message on LCD
+# - Take picture and upload to website on wrong PIN, displaying message on LCD
 # - Send IFTTT notifications on arm / disarm / wrong PIN (last one includes pic taken from camera)
 
 import subprocess
