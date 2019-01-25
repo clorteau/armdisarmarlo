@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# NorthernLights 2018-11-02
+# Clem 2018-11-18
 # - Display armed/disarmed status of Arlo cameras on LCD
 # - Arm/disarm on correct PIN input
 # - Take picture and upload to website on wrong PIN, displaying message on LCD
@@ -26,6 +26,7 @@ import json
 import requests
 import traceback
 import evdev
+import signal
 from enum import Enum
 from Arlo import Arlo
 from picamera import PiCamera
@@ -45,8 +46,8 @@ class IFTTTNotification(Enum):
     WrongPIN = "wrongPIN"
 
 class ArloManager(object):
-    user = "email@email.com" #recommend creating a dedicated Arlo user name so as to not get logged off other devices
-    passwd = "XXXXXXX" #yey security! Recommend using an encrypted filesystem
+    user = "xxxx@xxxxx.xxx" #recommend creating a dedicated Arlo user name so as to not get logged off other devices
+    passwd = "xxxxxxxxx" #yey security! Recommend using an encrypted filesystem
     arlo = None
     basestation = None
     camera = None
@@ -62,14 +63,9 @@ class ArloManager(object):
         self.arlo.Disarm(self.basestation)
 
     def getArmed(self):
-        status = None
-        while(True):
-            status = self.arlo.GetModes(self.basestation)
-            if (status == None):
-                self.connect()
-                time.sleep(1)
-            else:
-                break
+        status = self.arlo.GetModes(self.basestation)
+        if (status == None):
+            return None #probably token expired
         if (status['properties']['active'] == u'mode0'):
             return False
         else:
@@ -89,7 +85,9 @@ def drawImageOnLCD(lcd, arlo_armed, wrongPIN = False):
         draw.text((5, 40), "!! Wrong PIN !!", fill="RED", font=font)
         draw.text((30, 90), "Picture uploaded", fill="WHITE")
     else:
-        if (arlo_armed):
+        if (arlo_armed == None):
+            draw.text((45,45), "Wait...", fill="WHITE", font=font)
+        elif (arlo_armed):
             draw.text((40,45), "Armed", fill="RED", font=font)
         else:
             draw.text((25,45), "Disarmed", fill="GREEN", font=font)
@@ -97,10 +95,10 @@ def drawImageOnLCD(lcd, arlo_armed, wrongPIN = False):
 
 #Take a picture, upload to specified FTP host, return image URL
 def snapAndUpload():
-    ftp_user = "user"
-    ftp_pass = "pass"
-    ftp_host = "host"
-    ftp_dir = "/www/garage_snaps"
+    ftp_user = "xxxxx"
+    ftp_pass = "xxxxxx"
+    ftp_host = "ftp.xxxxxx.xxxx"
+    ftp_dir = "/www/xxxxxxx"
     filename = "snap" + '{:%Y-%m-%d--%H-%M-%S}'.format(datetime.datetime.now()) + ".jpg"
 
     camera = PiCamera()
@@ -116,10 +114,10 @@ def snapAndUpload():
                 raise Exception("FTP upload failed")
     os.remove(filename)
 
-    return "http://www.mysuperwebsite.com" + ftp_dir.replace('/www', '') + '/' + filename
+    return "http://www.xxxx.xxx" + ftp_dir.replace('/www', '') + '/' + filename
 
 def sendIFTTTNotification(notif, picture=None, debug=False):
-    key = "XXXXXXXXXXX" #Webhooks IFTTT applet key
+    key = "xxxxxxxxxxxx" #Webhooks IFTTT applet key
     if(notif == IFTTTNotification.WrongPIN):
         body = json.dumps({'value1': picture})
     else:
@@ -137,10 +135,14 @@ def sendIFTTTNotification(notif, picture=None, debug=False):
 def monitorAndUpdate(pinEntered, logger, debug, q):
     lcd = LCD_1in8.LCD()
     lcd.LCD_Init(LCD_1in8.SCAN_DIR_DFT)
+
+    token_refresh = 60 #Arlo session token refresh interval in minutes
+    last_token_refresh = datetime.datetime.now()
     arlo = ArloManager()
     arlo.connect()
     arlo_armed = arlo.getArmed()
     old_arlo_armed = False
+
     drawImageOnLCD(lcd, arlo_armed)
 
     while(True):
@@ -149,12 +151,33 @@ def monitorAndUpdate(pinEntered, logger, debug, q):
         if (debug):
             print("________")
             print("time: " + str(datetime.datetime.now()))
+
+        #refresh Arlo session token if needed
+        if (datetime.datetime.now() - last_token_refresh > datetime.timedelta(minutes=token_refresh)):
+        #if (False): #disabled to find workaround as it leaks memory
+            try:
+                arlo.connect()
+                last_token_refresh = datetime.datetime.now()
+                logger.info('Refreshed Arlo session token')
+                if (debug):
+                    print("Refreshed Arlo session token")
+            except Exception, e:
+                logger.error('Failed to connect: ' + str(e))
+                if (debug):
+                    logger.error(traceback.format_exc())
+
         try:
             arlo_armed = arlo.getArmed()
             if (debug):
                 print "arlo armed: " + str(arlo_armed)
+            if (arlo_armed == None):
+                logger.error('Connection error')
+                arlo_armed = old_arlo_armed #don't store "None" for next loop's comparison
+                arlo.connect()
+                logger.info('Refreshed Arlo connection token')
         except Exception, e:
             logger.error('Could not get Arlo status: ' + str(e))
+            arlo_armed = old_arlo_armed
             if(debug):
                 logger.error(traceback.format_exc())
 
@@ -179,6 +202,7 @@ def monitorAndUpdate(pinEntered, logger, debug, q):
 
             if(pinEntered == PinEntered.Right): #flip arlo arm/disarm status
                 logger.info("Correct PIN entered")
+                drawImageOnLCD(lcd, None) #this will display "Wait..." until next loop
                 if(arlo_armed):
                     arlo.disarm()
                 else:
@@ -224,9 +248,9 @@ def listenForPin(pinEntered, q):
             if (data.keystate == 1): #key down
                 key = data.keycode.replace('KEY_KP', '')
                 if (key == 'ENTER'):
-                    if (typed == '1234'): #again, yey security
+                    if (typed == '1234'): #your PIN here
                         pinEntered = PinEntered.Right
-                    elif (typed == 'SLASH'):
+                    elif (typed == 'SLASHSLASH'):
                         pinEntered = PinEntered.Quit
                     elif (typed == "DOT"):
                         pinEntered = PinEntered.Refresh
@@ -241,11 +265,17 @@ def listenForPin(pinEntered, q):
 
 if (__name__ == "__main__"):
     debug = False
+    kill = False
+    pidfile = '/tmp/keypad_pid'
+    
     argsparser = argparse.ArgumentParser(description='PIN based Arlo armer/disarmer')
     argsparser.add_argument('-d', '--debug', help='output debugging stuff', action='store_true')
+    argsparser.add_argument('-k', '--kill', help='kill running instance', action='store_true')
     args = argsparser.parse_args()
     if (args.debug):
         debug = True
+    if (args.kill):
+        kill = True
 
     logger = logging.getLogger('numpad arming')
     logger.setLevel(logging.DEBUG)
@@ -255,6 +285,25 @@ if (__name__ == "__main__"):
     logger.addHandler(sysloghandler)
     consolehandler = logging.StreamHandler()
     logger.addHandler(consolehandler)
+
+    #write pid in a file so we know what to kill if invoked with -k
+    if (not kill): #don't write this process' PID if invoked to kill an already instance
+        with open(pidfile, 'w') as file:
+            pid = str(os.getpid())
+            file.write(pid)
+            if (debug):
+                logger.debug('PID: ' + pid)
+
+
+    if (kill):
+        logger.info('Killing running instance')
+        with open(pidfile, 'r') as file:
+            pid = file.read()
+            if (debug):
+                logger.debug('PID to kill: ' + pid)
+            os.kill(int(pid), signal.SIGKILL)
+        os.remove(pidfile)
+        sys.exit(0)
 
     pinEntered = PinEntered.Unknown
     q = Queue.Queue()
