@@ -140,7 +140,7 @@ def monitorAndUpdate(pinEntered, logger, debug, q):
     last_token_refresh = datetime.datetime.now()
     arlo = ArloManager()
     arlo.connect()
-    arlo_armed = arlo.getArmed()
+    arlo_armed = False
     old_arlo_armed = False
 
     drawImageOnLCD(lcd, arlo_armed)
@@ -297,13 +297,17 @@ if (__name__ == "__main__"):
 
     if (kill):
         logger.info('Killing running instance')
-        with open(pidfile, 'r') as file:
-            pid = file.read()
-            if (debug):
-                logger.debug('PID to kill: ' + pid)
-            os.kill(int(pid), signal.SIGKILL)
-        os.remove(pidfile)
+        try:
+            with open(pidfile, 'r') as file:
+                pid = file.read()
+                if (debug):
+                    logger.debug('PID to kill: ' + pid)
+                os.kill(int(pid), signal.SIGKILL)
+                os.remove(pidfile)
+        except Exception,e :
+            logger.error('Could not find a running instance')
         sys.exit(0)
+
 
     pinEntered = PinEntered.Unknown
     q = Queue.Queue()
