@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Clem 2018-11-18
+# Clem 2019-01-25
 # - Display armed/disarmed status of Arlo cameras on LCD
 # - Arm/disarm on correct PIN input
 # - Take picture and upload to website on wrong PIN, displaying message on LCD
@@ -136,8 +136,6 @@ def monitorAndUpdate(pinEntered, logger, debug, q):
     lcd = LCD_1in8.LCD()
     lcd.LCD_Init(LCD_1in8.SCAN_DIR_DFT)
 
-    token_refresh = 60 #Arlo session token refresh interval in minutes
-    last_token_refresh = datetime.datetime.now()
     arlo = ArloManager()
     arlo.connect()
     arlo_armed = False
@@ -151,20 +149,6 @@ def monitorAndUpdate(pinEntered, logger, debug, q):
         if (debug):
             print("________")
             print("time: " + str(datetime.datetime.now()))
-
-        #refresh Arlo session token if needed
-        if (datetime.datetime.now() - last_token_refresh > datetime.timedelta(minutes=token_refresh)):
-        #if (False): #disabled to find workaround as it leaks memory
-            try:
-                arlo.connect()
-                last_token_refresh = datetime.datetime.now()
-                logger.info('Refreshed Arlo session token')
-                if (debug):
-                    print("Refreshed Arlo session token")
-            except Exception, e:
-                logger.error('Failed to connect: ' + str(e))
-                if (debug):
-                    logger.error(traceback.format_exc())
 
         try:
             arlo_armed = arlo.getArmed()
